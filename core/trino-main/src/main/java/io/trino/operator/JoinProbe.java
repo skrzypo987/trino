@@ -16,6 +16,7 @@ package io.trino.operator;
 import io.trino.spi.Page;
 import io.trino.spi.block.Block;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -59,7 +60,7 @@ public class JoinProbe
     private final Page page;
     private final Page probePage;
     private final Optional<Block> probeHashBlock;
-    private final long[] joinPositionsCache;
+    private long[] joinPositionsCache;
     private boolean reloadCache = true;
 
     private int position = -1;
@@ -118,9 +119,65 @@ public class JoinProbe
         // Extracted to local variables for performance reasons
         int firstPosition = this.position & (~JOIN_POSITIONS_CACHE_MASK);
         int limit = min(JOIN_POSITIONS_CACHE_SIZE, positionCount - firstPosition);
-        for (int i = 0; i < limit; ++i) {
-            joinPositionsCache[i] = getJoinPosition(firstPosition + i, lookupSource);
+        if (mayContainNullRows()) {
+            int[] positions = nonNullPositions(firstPosition, limit);
+            long[] result;
+            if (probeHashBlock.isPresent()) {
+                long[] rawHashes = new long[positions.length];
+                for (int i = 0; i < positions.length; ++i) {
+                    rawHashes[i] = BIGINT.getLong(probeHashBlock.get(), positions[i]);
+                }
+                result = lookupSource.getJoinPositions(positions, probePage, page, rawHashes);
+            }
+            else {
+                result = lookupSource.getJoinPositions(positions, probePage, page);
+            }
+
+            Arrays.fill(joinPositionsCache, -1);
+            for (int i = 0; i < positions.length; i++) {
+                joinPositionsCache[positions[i] - firstPosition] = result[i];
+            }
         }
+        else {
+            if (probeHashBlock.isPresent()) {
+                long[] rawHashes = new long[limit];
+                for (int i = 0; i < limit; ++i) {
+                    rawHashes[i] = BIGINT.getLong(probeHashBlock.get(), firstPosition + i);
+                }
+                joinPositionsCache = lookupSource.getJoinPositions(consecutivePositions(firstPosition, limit), probePage, page, rawHashes);
+            }
+            else {
+                joinPositionsCache = lookupSource.getJoinPositions(consecutivePositions(firstPosition, limit), probePage, page);
+            }
+        }
+    }
+
+    private int[] nonNullPositions(int firstPosition, int limit)
+    {
+        // Loop split into two for performance reasons
+        int nullPositions = 0;
+        for (int i = 0; i < limit; ++i) {
+            if (rowContainsNull(firstPosition + i)) {
+                nullPositions++;
+            }
+        }
+        int[] positions = new int[limit - nullPositions];
+        int count = 0;
+        for (int i = 0; i < limit; ++i) {
+            if (!rowContainsNull(firstPosition + i)) {
+                positions[count++] = firstPosition + i;
+            }
+        }
+        return positions;
+    }
+
+    private int[] consecutivePositions(int firstPosition, int limit)
+    {
+        int[] result = new int[limit];
+        for (int i = 0; i < limit; i++) {
+            result[i] = firstPosition + i;
+        }
+        return result;
     }
 
     private long getJoinPosition(int position, LookupSource lookupSource)
@@ -153,5 +210,10 @@ public class JoinProbe
             }
         }
         return false;
+    }
+
+    private boolean mayContainNullRows()
+    {
+        return nullableProbeBlocks.length != 0;
     }
 }
