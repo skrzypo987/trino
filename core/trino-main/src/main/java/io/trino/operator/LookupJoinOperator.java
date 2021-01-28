@@ -304,6 +304,7 @@ public class LookupJoinOperator
 
         private void processProbe(LookupSource lookupSource)
         {
+            probe.setLookupSource(lookupSource);
             do {
                 if (probe.getPosition() >= 0) {
                     if (!joinCurrentPosition(lookupSource, yieldSignal)) {
@@ -317,7 +318,7 @@ public class LookupJoinOperator
                     }
                     statisticsCounter.recordProbe(joinSourcePositions);
                 }
-                if (!advanceProbePosition(lookupSource)) {
+                if (!advanceProbePosition()) {
                     break;
                 }
             }
@@ -374,14 +375,14 @@ public class LookupJoinOperator
         /**
          * @return whether there are more positions on probe side
          */
-        private boolean advanceProbePosition(LookupSource lookupSource)
+        private boolean advanceProbePosition()
         {
             if (!probe.advanceNextPosition()) {
                 return false;
             }
 
             // update join position
-            joinPosition = probe.getCurrentJoinPosition(lookupSource);
+            joinPosition = probe.getCurrentJoinPosition();
             // reset row join state for next row
             joinSourcePositions = 0;
             currentProbePositionProducedRow = false;

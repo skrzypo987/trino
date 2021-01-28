@@ -16,6 +16,8 @@ package io.trino.operator;
 import io.trino.spi.Page;
 import io.trino.spi.block.Block;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -23,7 +25,6 @@ import java.util.OptionalInt;
 
 import static com.google.common.base.Verify.verify;
 import static io.trino.spi.type.BigintType.BIGINT;
-import static java.lang.Math.min;
 import static java.util.Arrays.stream;
 
 public class JoinProbe
@@ -47,13 +48,7 @@ public class JoinProbe
         }
     }
 
-    /**
-     * Cache size will be 2^JOIN_POSITIONS_CACHE_SIZE_EXP
-     */
-    private static final int JOIN_POSITIONS_CACHE_SIZE_EXP = 11;
-    private static final int JOIN_POSITIONS_CACHE_SIZE = 1 << JOIN_POSITIONS_CACHE_SIZE_EXP;
-    private static final int JOIN_POSITIONS_CACHE_MASK = JOIN_POSITIONS_CACHE_SIZE - 1;
-    private static final int BATCH_CACHE_THRESHOLD = 16384;
+    private static final int CACHE_THRESHOLD = 16384;
 
     private final int[] probeOutputChannels;
     private final int positionCount;
@@ -61,8 +56,9 @@ public class JoinProbe
     private final Page page;
     private final Page probePage;
     private final Optional<Block> probeHashBlock;
+    @Nullable
     private long[] joinPositionsCache;
-    private boolean reloadCache = true;
+    private LookupSource lookupSource;
 
     private int position = -1;
 
@@ -79,7 +75,14 @@ public class JoinProbe
         this.page = page;
         this.probePage = new Page(page.getPositionCount(), probeBlocks);
         this.probeHashBlock = probeHashChannel.isPresent() ? Optional.of(page.getBlock(probeHashChannel.getAsInt()).getLoadedBlock()) : Optional.empty();
-        joinPositionsCache = new long[JOIN_POSITIONS_CACHE_SIZE];
+    }
+
+    public void setLookupSource(LookupSource lookupSource)
+    {
+        this.lookupSource = lookupSource;
+        if (lookupSource.supportsCaching() && lookupSource.getJoinPositionCount() > CACHE_THRESHOLD) {
+            fillJoinPositionCache(lookupSource);
+        }
     }
 
     public int[] getOutputChannels()
@@ -91,9 +94,6 @@ public class JoinProbe
     {
         verify(position < positionCount, "already finished");
         position++;
-        if ((position & JOIN_POSITIONS_CACHE_MASK) == 0) {
-            reloadCache = true;
-        }
         return !isFinished();
     }
 
@@ -102,38 +102,18 @@ public class JoinProbe
         return position == positionCount;
     }
 
-    public long getCurrentJoinPosition(LookupSource lookupSource)
+    public long getCurrentJoinPosition()
     {
-        if (lookupSource.supportsCaching()) {
-            if (reloadCache) {
-                fillJoinPositionCache(lookupSource);
-                reloadCache = false;
-            }
-
-            return joinPositionsCache[position & JOIN_POSITIONS_CACHE_MASK];
+        if (joinPositionsCache == null) {
+            return getJoinPosition(position, lookupSource);
         }
-        return getJoinPosition(position, lookupSource);
+        return joinPositionsCache[position];
     }
 
     private void fillJoinPositionCache(LookupSource lookupSource)
     {
-        int firstPosition = this.position & (~JOIN_POSITIONS_CACHE_MASK);
-        int limit = min(JOIN_POSITIONS_CACHE_SIZE, positionCount - firstPosition);
-        // Batching with small lookup source will only create unnecessary overhead
-        if (lookupSource.getJoinPositionCount() > BATCH_CACHE_THRESHOLD) {
-            batchFillCache(lookupSource, firstPosition, limit);
-        }
-        else {
-            for (int i = 0; i < limit; ++i) {
-                joinPositionsCache[i] = getJoinPosition(firstPosition + i, lookupSource);
-            }
-        }
-    }
-
-    private void batchFillCache(LookupSource lookupSource, int firstPosition, int limit)
-    {
         if (mayContainNullRows()) {
-            int[] positions = nonNullPositions(firstPosition, limit);
+            int[] positions = nonNullPositions(positionCount);
             long[] result;
             if (probeHashBlock.isPresent()) {
                 long[] rawHashes = new long[positions.length];
@@ -146,49 +126,57 @@ public class JoinProbe
                 result = lookupSource.getJoinPositions(positions, probePage, page);
             }
 
-            Arrays.fill(joinPositionsCache, 0, limit, -1);
+            long[] cache = initCache();
             for (int i = 0; i < positions.length; i++) {
-                joinPositionsCache[positions[i] - firstPosition] = result[i];
+                cache[positions[i]] = result[i];
             }
         }
         else {
             if (probeHashBlock.isPresent()) {
-                long[] rawHashes = new long[limit];
-                for (int i = 0; i < limit; ++i) {
-                    rawHashes[i] = BIGINT.getLong(probeHashBlock.get(), firstPosition + i);
+                long[] rawHashes = new long[positionCount];
+                for (int i = 0; i < positionCount; ++i) {
+                    rawHashes[i] = BIGINT.getLong(probeHashBlock.get(), i);
                 }
-                joinPositionsCache = lookupSource.getJoinPositions(consecutivePositions(firstPosition, limit), probePage, page, rawHashes);
+                joinPositionsCache = lookupSource.getJoinPositions(consecutivePositions(), probePage, page, rawHashes);
             }
             else {
-                joinPositionsCache = lookupSource.getJoinPositions(consecutivePositions(firstPosition, limit), probePage, page);
+                joinPositionsCache = lookupSource.getJoinPositions(consecutivePositions(), probePage, page);
             }
         }
     }
 
-    private int[] nonNullPositions(int firstPosition, int limit)
+    private long[] initCache()
+    {
+        joinPositionsCache = new long[positionCount];
+        Arrays.fill(joinPositionsCache, 0, positionCount, -1);
+
+        return joinPositionsCache;
+    }
+
+    private int[] nonNullPositions(int limit)
     {
         // Loop split into two for performance reasons
         int nullPositions = 0;
         for (int i = 0; i < limit; ++i) {
-            if (rowContainsNull(firstPosition + i)) {
+            if (rowContainsNull(i)) {
                 nullPositions++;
             }
         }
         int[] positions = new int[limit - nullPositions];
         int count = 0;
         for (int i = 0; i < limit; ++i) {
-            if (!rowContainsNull(firstPosition + i)) {
-                positions[count++] = firstPosition + i;
+            if (!rowContainsNull(i)) {
+                positions[count++] = i;
             }
         }
         return positions;
     }
 
-    private int[] consecutivePositions(int firstPosition, int limit)
+    private int[] consecutivePositions()
     {
-        int[] result = new int[limit];
-        for (int i = 0; i < limit; i++) {
-            result[i] = firstPosition + i;
+        int[] result = new int[positionCount];
+        for (int i = 0; i < positionCount; i++) {
+            result[i] = i;
         }
         return result;
     }
