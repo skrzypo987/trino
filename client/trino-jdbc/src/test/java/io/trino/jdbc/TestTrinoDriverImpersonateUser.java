@@ -57,7 +57,7 @@ public class TestTrinoDriverImpersonateUser
                         .build())
                 .build();
 
-        server.getInstance(Key.get(PasswordAuthenticatorManager.class)).setAuthenticator(TestTrinoDriverImpersonateUser::authenticate);
+        server.getInstance(Key.get(PasswordAuthenticatorManager.class)).setAuthenticators(TestTrinoDriverImpersonateUser::authenticate);
     }
 
     private static Principal authenticate(String user, String password)

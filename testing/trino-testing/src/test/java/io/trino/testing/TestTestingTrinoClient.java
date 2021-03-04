@@ -60,7 +60,7 @@ public class TestTestingTrinoClient
                         .build())
                 .build();
 
-        server.getInstance(Key.get(PasswordAuthenticatorManager.class)).setAuthenticator(TestTestingTrinoClient::authenticate);
+        server.getInstance(Key.get(PasswordAuthenticatorManager.class)).setAuthenticators(TestTestingTrinoClient::authenticate);
     }
 
     private static Principal authenticate(String user, String password)

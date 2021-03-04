@@ -62,6 +62,7 @@ public class ServerSecurityModule
                 .internalOnlyResource(StoreResource.class);
 
         binder.bind(PasswordAuthenticatorManager.class).in(Scopes.SINGLETON);
+        configBinder(binder).bindConfig(PasswordAuthenticatorConfig.class);
         binder.bind(CertificateAuthenticatorManager.class).in(Scopes.SINGLETON);
 
         insecureHttpAuthenticationDefaults();
@@ -73,7 +74,7 @@ public class ServerSecurityModule
             configBinder(certificateBinder).bindConfig(CertificateConfig.class);
         }));
         installAuthenticator("kerberos", KerberosAuthenticator.class, KerberosConfig.class);
-        installAuthenticator("password", PasswordAuthenticator.class, PasswordAuthenticatorConfig.class);
+        install(authenticatorModule("password", PasswordAuthenticator.class, passwordBinder -> {}));
         install(authenticatorModule("jwt", JwtAuthenticator.class, new JwtAuthenticatorSupportModule()));
         install(authenticatorModule("oauth2", OAuth2Authenticator.class, new OAuth2AuthenticationSupportModule()));
 

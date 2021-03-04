@@ -17,6 +17,7 @@ import com.google.inject.Binder;
 import com.google.inject.Key;
 import com.google.inject.Module;
 import io.trino.server.security.Authenticator;
+import io.trino.server.security.PasswordAuthenticatorConfig;
 import io.trino.server.security.PasswordAuthenticatorManager;
 
 import static com.google.inject.Scopes.SINGLETON;
@@ -47,6 +48,7 @@ public class FormUiAuthenticatorModule
             binder.bind(FormAuthenticator.class).to(InsecureFormAuthenticator.class).in(SINGLETON);
         }
         configBinder(binder).bindConfig(FormWebUiConfig.class);
+        configBinder(binder).bindConfig(PasswordAuthenticatorConfig.class);
         jaxrsBinder(binder).bind(LoginResource.class);
         newOptionalBinder(binder, Key.get(Authenticator.class, ForWebUi.class));
     }

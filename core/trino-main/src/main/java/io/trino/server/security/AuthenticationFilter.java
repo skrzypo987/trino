@@ -24,6 +24,7 @@ import javax.ws.rs.ForbiddenException;
 import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.container.ContainerRequestFilter;
 
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -90,6 +91,15 @@ public class AuthenticationFilter
                     messages.add(e.getMessage());
                 }
                 e.getAuthenticateHeader().ifPresent(authenticateHeaders::add);
+
+                Arrays.stream(e.getSuppressed())
+                        .filter(ex -> ex instanceof AuthenticationException)
+                        .forEach(ex -> {
+                            if (ex.getMessage() != null) {
+                                messages.add(ex.getMessage());
+                            }
+                            ((AuthenticationException) ex).getAuthenticateHeader().ifPresent(authenticateHeaders::add);
+                        });
                 continue;
             }
 

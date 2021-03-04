@@ -162,7 +162,7 @@ public class TestWebUi
                         .put("http-server.authentication.type", "password")
                         .build())
                 .build()) {
-            server.getInstance(Key.get(PasswordAuthenticatorManager.class)).setAuthenticator(TestWebUi::authenticate);
+            server.getInstance(Key.get(PasswordAuthenticatorManager.class)).setAuthenticators(TestWebUi::authenticate);
             HttpServerInfo httpServerInfo = server.getInstance(Key.get(HttpServerInfo.class));
             testFormAuthentication(server, httpServerInfo, true);
         }
@@ -330,7 +330,7 @@ public class TestWebUi
                         .put("web-ui.enabled", "false")
                         .build())
                 .build()) {
-            server.getInstance(Key.get(PasswordAuthenticatorManager.class)).setAuthenticator(TestWebUi::authenticate);
+            server.getInstance(Key.get(PasswordAuthenticatorManager.class)).setAuthenticators(TestWebUi::authenticate);
 
             HttpServerInfo httpServerInfo = server.getInstance(Key.get(HttpServerInfo.class));
             testDisabled(httpServerInfo.getHttpUri());

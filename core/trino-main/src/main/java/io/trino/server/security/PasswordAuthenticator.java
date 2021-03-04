@@ -20,6 +20,7 @@ import javax.inject.Inject;
 import javax.ws.rs.container.ContainerRequestContext;
 
 import java.security.Principal;
+import java.util.List;
 
 import static io.trino.server.security.BasicAuthCredentials.extractBasicAuthCredentials;
 import static io.trino.server.security.UserMapping.createUserMapping;
@@ -47,22 +48,33 @@ public class PasswordAuthenticator
     {
         BasicAuthCredentials basicAuthCredentials = extractBasicAuthCredentials(request)
                 .orElseThrow(() -> needAuthentication(null));
-        try {
-            Principal principal = authenticatorManager.getAuthenticator().createAuthenticatedPrincipal(
-                    basicAuthCredentials.getUser(),
-                    basicAuthCredentials.getPassword()
-                            .orElseThrow(() -> new AuthenticationException("Malformed credentials: password is empty")));
-            String authenticatedUser = userMapping.mapUser(principal.toString());
-            return Identity.forUser(authenticatedUser)
-                    .withPrincipal(principal)
-                    .build();
+        String password = basicAuthCredentials.getPassword()
+                .orElseThrow(() -> new AuthenticationException("Malformed credentials: password is empty"));
+
+        List<io.trino.spi.security.PasswordAuthenticator> authenticators = authenticatorManager.getAuthenticators();
+        AuthenticationException exception = null;
+        for (io.trino.spi.security.PasswordAuthenticator authenticator : authenticators) {
+            try {
+                Principal principal = authenticator.createAuthenticatedPrincipal(basicAuthCredentials.getUser(), password);
+                String authenticatedUser = userMapping.mapUser(principal.toString());
+                return Identity.forUser(authenticatedUser)
+                        .withPrincipal(principal)
+                        .build();
+            }
+            catch (UserMappingException | AccessDeniedException e) {
+                if (exception == null) {
+                    exception = needAuthentication(e.getMessage());
+                }
+                else {
+                    exception.addSuppressed(needAuthentication(e.getMessage()));
+                }
+            }
+            catch (RuntimeException e) {
+                throw new RuntimeException("Authentication error", e);
+            }
         }
-        catch (UserMappingException | AccessDeniedException e) {
-            throw needAuthentication(e.getMessage());
-        }
-        catch (RuntimeException e) {
-            throw new RuntimeException("Authentication error", e);
-        }
+
+        throw exception;
     }
 
     private static AuthenticationException needAuthentication(String message)
