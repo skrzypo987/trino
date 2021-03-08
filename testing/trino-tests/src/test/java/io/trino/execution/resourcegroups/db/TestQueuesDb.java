@@ -37,6 +37,7 @@ import java.util.concurrent.TimeUnit;
 
 import static io.airlift.testing.Assertions.assertContains;
 import static io.trino.SystemSessionProperties.QUERY_MAX_EXECUTION_TIME;
+import static io.trino.SystemSessionProperties.QUERY_MAX_PLANNING_TIME;
 import static io.trino.execution.QueryState.FAILED;
 import static io.trino.execution.QueryState.FINISHED;
 import static io.trino.execution.QueryState.QUEUED;
@@ -62,6 +63,7 @@ import static io.trino.spi.StandardErrorCode.QUERY_REJECTED;
 import static io.trino.testing.TestingSession.testSessionBuilder;
 import static java.lang.String.format;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
 
@@ -71,6 +73,28 @@ public class TestQueuesDb
 {
     // Copy of TestQueues with tests for db reconfiguration of resource groups
     private static final String LONG_LASTING_QUERY = "SELECT COUNT(*) FROM lineitem";
+    // Query 13 from TPCH
+    private static final String LONG_PLANNING_QUERY = "SELECT \n" +
+            "  c_count, \n" +
+            "  count(*) as custdist\n" +
+            "FROM (\n" +
+            "  SELECT \n" +
+            "    c.custkey, \n" +
+            "    count(o.orderkey)\n" +
+            "  FROM \n" +
+            "    \"customer\" c\n" +
+            "    LEFT OUTER JOIN\n" +
+            "    \"orders\" o\n" +
+            "  ON \n" +
+            "    c.custkey = o.custkey\n" +
+            "    AND o.comment NOT LIKE '%special%requests%'\n" +
+            "  GROUP BY c.custkey\n" +
+            ") AS c_orders (c_custkey, c_count)\n" +
+            "GROUP BY \n" +
+            "  c_count\n" +
+            "ORDER BY \n" +
+            "  custdist DESC, \n" +
+            "  c_count DESC";
     private DistributedQueryRunner queryRunner;
     private H2ResourceGroupsDao dao;
 
@@ -304,6 +328,26 @@ public class TestQueuesDb
         dispatchManager.cancelQuery(firstQuery);
         // wait until the second one is FAILED
         waitForQueryState(queryRunner, secondQuery, FAILED);
+    }
+
+    @Test(timeOut = 60_000)
+    public void testQueryPlanningTimeLimit()
+            throws Exception
+    {
+        QueryManager queryManager = queryRunner.getCoordinator().getQueryManager();
+        QueryId query = createQuery(
+                queryRunner,
+                testSessionBuilder()
+                        .setCatalog("tpch")
+                        .setSchema("sf100000")
+                        .setSource("dashboard")
+                        .setSystemProperty(QUERY_MAX_PLANNING_TIME, "1ms")
+                        .build(),
+                LONG_PLANNING_QUERY);
+        waitForQueryState(queryRunner, query, FAILED);
+        assertThat(queryManager.getFullQueryInfo(query).getErrorCode()).isEqualTo(EXCEEDED_TIME_LIMIT.toErrorCode());
+        assertThat(queryManager.getFullQueryInfo(query).getFailureInfo().getMessage())
+                .contains("Query exceeded the maximum planning time limit of 1.00ms");
     }
 
     @Test

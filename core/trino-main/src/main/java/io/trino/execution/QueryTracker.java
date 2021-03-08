@@ -38,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 
 import static com.google.common.base.Preconditions.checkState;
 import static io.trino.SystemSessionProperties.getQueryMaxExecutionTime;
+import static io.trino.SystemSessionProperties.getQueryMaxPlanningTime;
 import static io.trino.SystemSessionProperties.getQueryMaxRunTime;
 import static io.trino.spi.StandardErrorCode.ABANDONED_QUERY;
 import static io.trino.spi.StandardErrorCode.EXCEEDED_TIME_LIMIT;
@@ -178,11 +179,17 @@ public class QueryTracker<T extends TrackedQuery>
             }
             Duration queryMaxRunTime = getQueryMaxRunTime(query.getSession());
             Duration queryMaxExecutionTime = getQueryMaxExecutionTime(query.getSession());
+            Duration queryMaxPlanningTime = getQueryMaxPlanningTime(query.getSession());
             Optional<DateTime> executionStartTime = query.getExecutionStartTime();
             DateTime createTime = query.getCreateTime();
-            if (executionStartTime.isPresent() && executionStartTime.get().plus(queryMaxExecutionTime.toMillis()).isBeforeNow()) {
-                query.fail(new TrinoException(EXCEEDED_TIME_LIMIT, "Query exceeded the maximum execution time limit of " + queryMaxExecutionTime));
-            }
+            executionStartTime.ifPresent(startTime -> {
+                if (startTime.plus(queryMaxExecutionTime.toMillis()).isBeforeNow()) {
+                    query.fail(new TrinoException(EXCEEDED_TIME_LIMIT, "Query exceeded the maximum execution time limit of " + queryMaxExecutionTime));
+                }
+                if (!query.isPlanningFinished() && startTime.plus(queryMaxPlanningTime.toMillis()).isBeforeNow()) {
+                    query.fail(new TrinoException(EXCEEDED_TIME_LIMIT, "Query exceeded the maximum planning time limit of " + queryMaxPlanningTime));
+                }
+            });
             if (createTime.plus(queryMaxRunTime.toMillis()).isBeforeNow()) {
                 query.fail(new TrinoException(EXCEEDED_TIME_LIMIT, "Query exceeded maximum time limit of " + queryMaxRunTime));
             }
@@ -279,6 +286,8 @@ public class QueryTracker<T extends TrackedQuery>
     public interface TrackedQuery
     {
         QueryId getQueryId();
+
+        boolean isPlanningFinished();
 
         boolean isDone();
 

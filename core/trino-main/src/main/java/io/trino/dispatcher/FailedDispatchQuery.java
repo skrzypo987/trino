@@ -36,6 +36,7 @@ import java.util.Optional;
 import java.util.concurrent.Executor;
 
 import static com.google.common.util.concurrent.Futures.immediateFuture;
+import static io.trino.execution.QueryState.PLANNING;
 import static io.trino.memory.LocalMemoryManager.GENERAL_POOL;
 import static io.trino.server.DynamicFilterService.DynamicFiltersStats;
 import static io.trino.util.Failures.toFailure;
@@ -136,6 +137,12 @@ public class FailedDispatchQuery
     public QueryId getQueryId()
     {
         return basicQueryInfo.getQueryId();
+    }
+
+    @Override
+    public boolean isPlanningFinished()
+    {
+        return getState().ordinal() > PLANNING.ordinal();
     }
 
     @Override

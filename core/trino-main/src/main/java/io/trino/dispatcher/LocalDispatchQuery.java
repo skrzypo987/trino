@@ -44,6 +44,7 @@ import static io.airlift.concurrent.MoreFutures.addSuccessCallback;
 import static io.airlift.concurrent.MoreFutures.tryGetFutureValue;
 import static io.trino.SystemSessionProperties.getRequiredWorkers;
 import static io.trino.SystemSessionProperties.getRequiredWorkersMaxWait;
+import static io.trino.execution.QueryState.PLANNING;
 import static io.trino.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
 import static io.trino.util.Failures.toFailure;
 import static java.util.Objects.requireNonNull;
@@ -198,6 +199,12 @@ public class LocalDispatchQuery
     public QueryId getQueryId()
     {
         return stateMachine.getQueryId();
+    }
+
+    @Override
+    public boolean isPlanningFinished()
+    {
+        return getState().ordinal() > PLANNING.ordinal();
     }
 
     @Override

@@ -86,6 +86,7 @@ import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Throwables.throwIfInstanceOf;
 import static io.airlift.units.DataSize.succinctBytes;
 import static io.trino.SystemSessionProperties.isEnableDynamicFiltering;
+import static io.trino.execution.QueryState.PLANNING;
 import static io.trino.execution.buffer.OutputBuffers.BROADCAST_PARTITION_ID;
 import static io.trino.execution.buffer.OutputBuffers.createInitialEmptyOutputBuffers;
 import static io.trino.execution.scheduler.SqlQueryScheduler.createSqlQueryScheduler;
@@ -559,6 +560,12 @@ public class SqlQueryExecution
         requireNonNull(cause, "cause is null");
 
         stateMachine.transitionToFailed(cause);
+    }
+
+    @Override
+    public boolean isPlanningFinished()
+    {
+        return getState().ordinal() > PLANNING.ordinal();
     }
 
     @Override

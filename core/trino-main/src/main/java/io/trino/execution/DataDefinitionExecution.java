@@ -45,6 +45,7 @@ import java.util.function.Consumer;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Throwables.throwIfInstanceOf;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
+import static io.trino.execution.QueryState.PLANNING;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
@@ -217,6 +218,12 @@ public class DataDefinitionExecution<T extends Statement>
     public void fail(Throwable cause)
     {
         stateMachine.transitionToFailed(cause);
+    }
+
+    @Override
+    public boolean isPlanningFinished()
+    {
+        return getState().ordinal() > PLANNING.ordinal();
     }
 
     @Override
